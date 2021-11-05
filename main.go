@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
@@ -29,12 +28,15 @@ func main() {
 
 	var broker = "mqtt.example.com"
 	var port = 1883
+	var username = "telldus"
+	var password = "secret"
+	var eventSocket = "/tmp/TelldusEvents"
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", broker, port))
 	opts.SetClientID("telldusbridge")
-	opts.SetUsername("telldus")
-	opts.SetPassword("secret")
+	opts.SetUsername(username)
+	opts.SetPassword(password)
 	opts.SetDefaultPublishHandler(messagePubHandler)
 	opts.OnConnect = connectHandler
 	opts.OnConnectionLost = connectLostHandler
@@ -43,7 +45,7 @@ func main() {
 		panic(token.Error())
 	}
 
-	c, err := net.Dial("unix", "/tmp/TelldusEvents")
+	c, err := net.Dial("unix", eventSocket)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -57,26 +59,36 @@ func main() {
 		}
 
 		data := buf[0:nr]
-		fmt.Printf("Received: %v", string(data))
+		fmt.Printf("Received: %v\n", string(data))
 
 		_, paramstrings, _ := splitTelldus(string(data))
 
 		params := getParams(paramstrings)
+
+		if params["protocol"] == "arctech" {
+			singleString := params["house"] + "-" + params["unit"] + "-" + params["group"] + "-" + params["method"]
+			send(client, singleString)
+		}
 
 		jsonString, err := json.Marshal(params)
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Println(string(jsonString))
-
-		// Send messge
-		token := client.Publish("telldus/event", 0, false, string(jsonString))
-		token.Wait()
-		time.Sleep(time.Second)
+		// Send message
+		send(client, string(jsonString))
 
 	}
 }
+
+func send(client mqtt.Client, message string) {
+	// Send message
+
+	fmt.Printf("Sending '%v'\n", message)
+	token := client.Publish("telldus/event", 0, false, message)
+	token.Wait()
+}
+
 func sub(client mqtt.Client) {
 	topic := "#"
 	token := client.Subscribe(topic, 1, nil)
@@ -85,12 +97,20 @@ func sub(client mqtt.Client) {
 }
 
 func splitTelldus(message string) (string, []string, string) {
-	fields := strings.Split(telldusString, ";")
+	fields := strings.Split(message, ";")
 
-	header, paramstrings, rest :=
-		fields[0],
-		fields[1:len(fields)-1],
-		fields[len(fields)-1]
+	var header string
+	var paramstrings []string
+	var rest string
+
+	header = fields[0]
+	if len(fields) > 1 {
+		paramstrings = fields[1:len(fields)-1]
+	}
+
+	if len(fields) > 1 {
+		rest = fields[len(fields)-1]
+	}
 
 	return header, paramstrings, rest
 }
