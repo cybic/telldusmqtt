@@ -1,12 +1,15 @@
 package main
 
 import (
+	"os"
 	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	yaml "gopkg.in/yaml.v2"
+	defaults "github.com/creasty/defaults"
 )
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
@@ -21,20 +24,26 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 	fmt.Printf("Received message: %s from topic: %s\n", msg.Payload(), msg.Topic())
 }
 
-var telldusString = "16:TDRawDeviceEvent95:class:command;protocol:arctech;model:selflearning;house:29145578;unit:2;group:0;method:turnoff;i1s"
-
 func main() {
 	fmt.Println("Starting!")
 
-	var broker = "mqtt.example.com"
-	var port = 1883
-	var username = "telldus"
-	var password = "secret"
-	var eventSocket = "/tmp/TelldusEvents"
+	fmt.Println("Reading config file")
+	var systemConfigFile = "/etc/telldusmqtt.conf"
+	var config Config
+
+	ReadConfig(systemConfigFile, &config)
+
+	var broker = config.MqttServer.BrokerHost
+	var port = config.MqttServer.BrokerPort
+	fmt.Printf("Config host: %s:%s\n", broker, port)
+	var username = config.MqttServer.Username
+	var password = config.MqttServer.Password
+	var clientId = config.MqttServer.ClientId
+	var eventSocket = config.TelldusBridge.TelldusEventsSocket
 
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", broker, port))
-	opts.SetClientID("telldusbridge")
+	opts.AddBroker(fmt.Sprintf("tcp://%s:%s", broker, port))
+	opts.SetClientID(clientId)
 	opts.SetUsername(username)
 	opts.SetPassword(password)
 	opts.SetDefaultPublishHandler(messagePubHandler)
@@ -126,4 +135,45 @@ func getParams(paramFields []string) map[string]string {
 	}
 
 	return params
+}
+
+type Config struct {
+  MqttServer struct {
+    BrokerHost string `yaml:"brokerhost"`
+    BrokerPort string `yaml:"brokerport" default:"1883"`
+    Username string `yaml:"username"`
+    Password string `yaml:"password"`
+    ClientId string `yaml:"clientid" default:"telldusbridge"`
+  } `yaml:"mqtt"`
+
+  TelldusBridge struct {
+    TelldusEventsSocket string `yaml:"eventsocket" default:"/tmp/TelldusEvents"`
+    MqttEventTopic string `yaml:"mqtttopic" "telldus/event"`
+  } `yaml:"events"`
+
+}
+
+func ReadConfig(filename string, config *Config) {
+
+	defaults.Set(config)
+
+  f, err := os.Open(filename)
+  if err != nil {
+    printError(err)
+  }
+	defer f.Close()
+
+	decoder := yaml.NewDecoder(f)
+	err = decoder.Decode(&config)
+	if err != nil {
+		printError(err)
+	}
+
+	fmt.Println(config)
+
+}
+
+func printError(err error) {
+	fmt.Println(err)
+	os.Exit(2)
 }

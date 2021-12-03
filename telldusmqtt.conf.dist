@@ -1,0 +1,7 @@
+mqtt:
+  brokerhost: mqtt.example.com
+  username: "username"
+  password: "password"
+events:
+  eventsocket: "/tmp/TelldusEvents"
+  mqtttopic: "telldus/event"
